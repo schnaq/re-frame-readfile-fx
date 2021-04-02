@@ -1,14 +1,10 @@
 (ns jtk-dvlp.re-frame.readfile-fx
-  (:require-macros
-   [cljs.core.async.macros :refer [go]])
-
   (:require
-   [cljs.core.async :as async]
-   [re-frame.core :as re-frame]))
-
+    [cljs.core.async :as async :refer [go]]
+    [re-frame.core :as re-frame]))
 
 (defn- do-readfile!
-  [file charset]
+  [file]
   (let [result (async/promise-chan)]
     (try
       (let [meta
@@ -17,8 +13,7 @@
              :type (.-type file)
              :last-modified (.-lastModified file)}
 
-            reader
-            (js/FileReader.)
+            reader (js/FileReader.)
 
             on-loaded
             (fn [_]
@@ -29,9 +24,7 @@
 
         (.addEventListener reader "load" on-loaded)
 
-        (if charset
-          (.readAsText reader file charset)
-          (.readAsText reader file)))
+        (.readAsDataURL reader file))
 
       (catch js/Object error
         (async/put! result {:error error :file file})
@@ -40,23 +33,18 @@
     result))
 
 (re-frame/reg-fx
- :readfile
- (fn readfile-fx
-   [{:keys [files charsets on-success on-error]}]
-   (go
-     (let [charsets
-           (if (or (string? charsets) (nil? charsets))
-             (repeat charsets)
-             charsets)
+  :readfile
+  (fn readfile-fx
+    [{:keys [files on-success on-error]}]
+    (go
+      (let [contents
+            (->> (mapv do-readfile! files)
+                 (async/map vector)
+                 (async/<!))
 
-           contents
-           (->> (mapv do-readfile! files charsets)
-                (async/map vector)
-                (async/<!))
+            errors
+            (filter :error contents)]
 
-           errors
-           (filter :error contents)]
-
-       (if (seq errors)
-         (re-frame/dispatch (conj on-error contents))
-         (re-frame/dispatch (conj on-success contents)))))))
+        (if (seq errors)
+          (re-frame/dispatch (conj on-error contents))
+          (re-frame/dispatch (conj on-success contents)))))))
